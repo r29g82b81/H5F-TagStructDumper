@@ -25,9 +25,8 @@ namespace TagStructDumper{
 
             // EXAMPLE ARGS, and used for testing
             args = new string[] 
-            { "C:\\Users\\Joe bingle\\Downloads\\plugins",
-              // "6.10024.15613.0", // this value is now automatically determined
-              //"2185886236672" // int64? not hexadecimal
+            { "C:\\Users\\ct770\\Downloads\\plugins2",
+              "1468735168512" // int64? not hexadecimal
             };
 
 
@@ -73,7 +72,7 @@ namespace TagStructDumper{
             startAddress = starting_address;
             // now setup the memory.dll
             M = new Mem();
-            if (M.OpenProcess("HaloInfinite.exe")){
+            if (M.OpenProcess(0x000021F0)){
                 Console.WriteLine("Successfully Hooked to process");
                 current_game_version = M.mProc.MainModule.FileVersionInfo.ProductVersion;
                 initialized = true;
@@ -99,8 +98,8 @@ namespace TagStructDumper{
             // test whether start address was given to us or if not, if we can find it
 
             if (startAddress != 0){ // we were given an address to start with, lets double check to make sure its right
-                long val_test = M.ReadLong((startAddress + 0xC).ToString("X"));
-                if (val_test != 7013337615930712659){ // 'SboGgaTa'
+                long val_test = M.ReadLong((startAddress + 12).ToString("X"));
+                if (val_test != 0x615461673C66783E){ // '>xf<gaTa'
                     Console.WriteLine("Provided address was incorrect, reverting to AOB scan");
                     startAddress = 0;
                 } // else we're absolutely golden to run this
@@ -117,23 +116,21 @@ namespace TagStructDumper{
 
             // do Z's thing to count the tags
             int tagCount = 0;
-            int expectedID = -1;
             long curAddress = startAddress;
             // we need to iterate through all possible tagstructs & match their ID thing with the expected ID thing
             // if it doesn't match that that means we reached the end
             while (true){
-                int curr_id = M.ReadInt((curAddress + 40).ToString("X"));
-                if (curr_id == expectedID){
+                int curr_id = M.ReadInt((curAddress + 1608).ToString("X"));
+                if (curr_id == 1){
                     tagCount++;
-                    expectedID--; // the next tag will have an ID that is 1 less than the last
-                    curAddress += 88;
+                    curAddress += 1616;
                 }else break; // its virtually inmpossible that the following data will have the exact value hopefully
                 
             }
 
             Console.WriteLine("Found " + tagCount + " tag structs!");
-            if (tagCount < 485)
-                Console.WriteLine("thats less than the (485) expected count, scan potentially failed!");
+            if (tagCount < 289)
+                Console.WriteLine("thats less than the (289) expected count, scan potentially failed!");
 
 
             // finally, begin the dump
@@ -148,10 +145,10 @@ namespace TagStructDumper{
         }
         // heres the AOB scan part, fixed
         private async Task<long> AoBScan(){
-            long[] results = (await M.AoBScan("?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 53 62 6F 47 67 61 54 61", true, false)).ToArray();
+            long[] results = (await M.AoBScan("01 01 01 00 00 00 00 00 ?? ?? ?? ?? ?? ?? ?? ?? 02 00 00 00 3E 78 66 3C 67 61 54 61 01 00 00 00", true, false)).ToArray();
             if (results.Length == 0)
                 return 0;
-            return results[0];
+            return results[0] + 8;
         }
     }
 
@@ -183,6 +180,10 @@ namespace TagStructDumper{
 
         private List<string> param_types_list = new List<string>();
 
+        string filter_malformed_chars(string input){
+            return input.Replace('\x01', '_');
+        }
+
         public bool DumpStructs(string game_version)
         {
             try
@@ -193,11 +194,11 @@ namespace TagStructDumper{
                 for (int iteration_index = 0; iteration_index < tagCount; iteration_index++)
                 {
                     // read the crucial infos
-                    long current_tag_struct_Address = startAddress + (iteration_index * 88);
+                    long current_tag_struct_Address = startAddress + (iteration_index * 1616);
                     string group_name = M.ReadString((current_tag_struct_Address + 12).ToString("X"), "", 4);
 
                     // we now apply the file name before creating it, so no more temp files
-                    string tag_group = ReverseString(group_name).Replace("*", "_");
+                    string tag_group = ReverseString(group_name).Replace("*", "_").Replace("<", "_").Replace(">", "_");
                     string outpath = outDIR + @"\" + tag_group;
                     // "cmpS" has a similar tag that has the same chars but different capitialization
                     if (File.Exists(outpath + ".xml"))
@@ -222,20 +223,22 @@ namespace TagStructDumper{
                         if (root_name_address != 0) root_name = M.ReadString(root_name_address.ToString("X"), "", 300);
                         textWriter.WriteAttributeString("Name", root_name);
 
-                        // write the group parents 
-                        string parent_1 = ReverseString(M.ReadString((current_tag_struct_Address + 0x2C).ToString("X"), "", 4));
-                        string parent_2 = ReverseString(M.ReadString((current_tag_struct_Address + 0x30).ToString("X"), "", 4));
-                        string parent_3 = ReverseString(M.ReadString((current_tag_struct_Address + 0x34).ToString("X"), "", 4));
-                        if (!string.IsNullOrWhiteSpace(parent_2)) parent_1 += "," + parent_2;
-                        if (!string.IsNullOrWhiteSpace(parent_3)) parent_1 += "," + parent_3;
-                        textWriter.WriteAttributeString("Parents", string.Join(",", parent_1));
+                        // write the group parents (just 1 in h5)
+                        string parent_1 = ReverseString(M.ReadString((current_tag_struct_Address + 16).ToString("X"), "", 4));
+                        //string parent_2 = ReverseString(M.ReadString((current_tag_struct_Address + 0x30).ToString("X"), "", 4));
+                        //string parent_3 = ReverseString(M.ReadString((current_tag_struct_Address + 0x34).ToString("X"), "", 4));
+                        //if (!string.IsNullOrWhiteSpace(parent_2)) parent_1 += "," + parent_2;
+                        //if (!string.IsNullOrWhiteSpace(parent_3)) parent_1 += "," + parent_3;
+                        textWriter.WriteAttributeString("Parents", parent_1);
+                        // in h5 we get 1564 bytes allocated for child groups as well
+
 
                         // write the group index
-                        textWriter.WriteAttributeString("Index", M.ReadInt((current_tag_struct_Address + 0x28).ToString("X")).ToString());
+                        textWriter.WriteAttributeString("Index", M.ReadInt((current_tag_struct_Address + 20).ToString("X")).ToString());
 
-                        // write the category string
-                        long category_name_address = M.ReadLong((current_tag_struct_Address + 0x48).ToString("X"));
-                        if (category_name_address != 0) textWriter.WriteAttributeString("C", M.ReadString(category_name_address.ToString("X"), "", 300));
+                        // write the category string (not in h5?)
+                        //long category_name_address = M.ReadLong((current_tag_struct_Address + 0x48).ToString("X"));
+                        //if (category_name_address != 0) textWriter.WriteAttributeString("C", M.ReadString(category_name_address.ToString("X"), "", 300));
 
                         // TODO: write data from toplevel group_def_link_struct
                         // we're currently skipping it because it doesn't really contain any useful information
@@ -244,8 +247,8 @@ namespace TagStructDumper{
                         Dictionary<string, long> structs_to_append = new Dictionary<string, long>();
                         // assign our top level struct to the list
                         // this code will convert gdls to the next tagstruct
-                        long gdls_address = M.ReadLong((current_tag_struct_Address + 0x20).ToString("X"));
-                        long tagstruct_address = M.ReadLong((gdls_address + 0x18).ToString("X"));
+                        long gdls_address = M.ReadLong((current_tag_struct_Address + 32).ToString("X"));
+                        long tagstruct_address = M.ReadLong((gdls_address + 32).ToString("X"));
                         string root_GUID = read_guid_from_tagstruct(tagstruct_address);
                         tag_group_guid_associations.Add(tag_group, root_GUID);
                         structs_to_append.Add(root_GUID, tagstruct_address);
@@ -265,17 +268,26 @@ namespace TagStructDumper{
                             textWriter.WriteStartElement("_" + GUID);
                             //textWriter.WriteAttributeString("GUID_1", read_guid2_from_tagstruct(current_base_address));
 
+                            // 0x00 - name 1
+                            // 0x08 - name 2
+                            // 0x10 - GUID 1
+                            // 0x18 - GUID 2
+                            // 0x20 - param struct address
+                            // 0x28 - param struct sizeof
+                            // 0x30 - param struct sizeof assert string?
+
+
                             // read the TWO strings, if they're different then append both
                             string first_name = M.ReadString(M.ReadLong(current_base_address.ToString("X")).ToString("X"), "", 300);
                             textWriter.WriteAttributeString("Name", first_name);
                             string second_name = M.ReadString(M.ReadLong((current_base_address + 8).ToString("X")).ToString("X"), "", 300);
                             if (!string.IsNullOrWhiteSpace(second_name) && second_name != first_name) textWriter.WriteAttributeString("Name2", second_name);
                             // write alt guid
-                            string alt_guid = M.ReadLong((current_base_address + 0x48).ToString("X")).ToString("X");
+                            string alt_guid = M.ReadLong((current_base_address + 144).ToString("X")).ToString("X");
                             textWriter.WriteAttributeString("Alt", alt_guid);
 
                             // determine the count of children and then process them all
-                            int children_count = M.ReadInt((current_base_address + 0x78).ToString("X"));
+                            //int children_count = M.ReadInt((current_base_address + 216).ToString("X"));
                             long child_start_address = M.ReadLong((current_base_address + 0x20).ToString("X"));
 
 
@@ -284,22 +296,35 @@ namespace TagStructDumper{
                             // wow isnt that handy, WE HAVE TO CACULATE IT BEFORE READING ANY MF PARAMS
                             // so we just end up running through this whole thing twice, how epic
                             int struct_total_size = test_struct_size(current_base_address);
+                            int reported_total_size = M.ReadInt((current_base_address + 0x28).ToString("X"));
 
-                            textWriter.WriteAttributeString("Size", struct_total_size.ToString("X"));
-                            for (int i = 0; i < children_count; i++)
+                            //textWriter.WriteAttributeString("CalculatedSize", struct_total_size.ToString("X"));
+                            textWriter.WriteAttributeString("Size", reported_total_size.ToString("X"));
+                            if (struct_total_size != reported_total_size)
+                            {
+                                Console.WriteLine("Size mismatch for tag " + tag_group + ", struct " + first_name + " (" + GUID + ") - calculated: " + struct_total_size.ToString("X") + ", verified: " + reported_total_size.ToString("X"));
+                            }
+                            //for (int i = 0; i < children_count; i++)
+                            for (int i = 0; ; i++)
                             {
                                 // figure out the address of this param struct
-                                long current_param_address = child_start_address + (i * 0x18);
+                                long current_param_address = child_start_address + (i * 32);
 
                                 // writenode and name
-                                int param_group = M.ReadInt((current_param_address + 0x08).ToString("X"));
+                                int param_group = M.ReadInt((current_param_address).ToString("X"));
+
+
                                 if (param_group != 0x3B) // this is the end of struct, we dont write this one
                                 {
                                     textWriter.WriteStartElement("_" + param_group.ToString("X"));
-                                    string DELETEME_name = M.ReadString(M.ReadLong(current_param_address.ToString("X")).ToString("X"), "", 300);
+                                    long name_ptr = M.ReadLong((current_param_address + 8).ToString("X"));
+                                    string DELETEME_name = "unlabelled_0x" + struct_offset.ToString("X");
+                                    if (name_ptr != 0) DELETEME_name = filter_malformed_chars(M.ReadString(name_ptr.ToString("X"), "", 300));
+
                                     textWriter.WriteAttributeString("Name", DELETEME_name);
+
                                     // write the signature if it has one
-                                    string param_signature = M.ReadString((current_param_address + 0x0C).ToString("X"), "", 4);
+                                    string param_signature = M.ReadString((current_param_address + 24).ToString("X"), "", 4);
                                     if (!string.IsNullOrWhiteSpace(param_signature))
                                     {
                                         string param_type = ReverseString(param_signature);
@@ -364,10 +389,10 @@ namespace TagStructDumper{
                                         case 0x2C:
                                         case 0x2E:
                                         case 0x30:
-                                        case 0x40: // actual tagblock
+                                        case 0x40: // actual tagblock...
                                             if (param_data_address > 0)
                                             {
-                                                long block_tagstruct_address = M.ReadLong((param_data_address + 0x18).ToString("X"));
+                                                long block_tagstruct_address = M.ReadLong((param_data_address + 32).ToString("X"));
                                                 string target_guid = read_guid_from_tagstruct(block_tagstruct_address);
                                                 // write the target guid to the node
                                                 textWriter.WriteAttributeString("GUID", target_guid.ToString());
@@ -380,8 +405,13 @@ namespace TagStructDumper{
                                                 // read min and max values
                                                 textWriter.WriteAttributeString("Min", M.ReadInt((param_data_address + 0x10).ToString("X")).ToString());
                                                 textWriter.WriteAttributeString("Max", M.ReadInt((param_data_address + 0x14).ToString("X")).ToString());
+
+                                                string max_description = M.ReadString(M.ReadLong((param_data_address + 24).ToString("X")).ToString("X"), "", 300);
+                                                if (!string.IsNullOrWhiteSpace(max_description)) textWriter.WriteAttributeString("MaxDescription", max_description);
+
                                                 // double check to make sure it isn't referencing one we already added
-                                                if (!structs_to_append.Keys.Contains(target_guid)) structs_to_append.Add(target_guid, block_tagstruct_address);
+                                                if (!structs_to_append.Keys.Contains(target_guid))
+                                                    structs_to_append.Add(target_guid, block_tagstruct_address);
                                             }
                                             break;
                                         // PADDING BLOCKS
@@ -431,8 +461,8 @@ namespace TagStructDumper{
                                                 // test if exists
                                                 long Unk_0x10 = M.ReadLong((param_data_address + 0x10).ToString("X"));
                                                 if (Unk_0x10 != 0)
-                                                { // unknown val
-
+                                                { // now a known val
+                                                    textWriter.WriteAttributeString("Description", M.ReadString(Unk_0x10.ToString("X"), "", 300));
                                                 }
                                             }
                                             break;
@@ -529,7 +559,7 @@ namespace TagStructDumper{
                                     // close off the param element
                                     textWriter.WriteEndElement();
                                 }
-
+                                else break;
                             }
                             // close off the struct element
                             textWriter.WriteEndElement();
@@ -596,20 +626,29 @@ namespace TagStructDumper{
 
         int test_struct_size(long struct_ptr)
         {
-            long struct_params_address = M.ReadLong((struct_ptr + 0x20).ToString("X"));
-            int children_count = M.ReadInt((struct_ptr + 0x78).ToString("X"));
+            long struct_params_address = M.ReadLong((struct_ptr + 32).ToString("X"));
+            //int children_count = M.ReadInt((struct_ptr + 216).ToString("X"));
+            int reported_total_size = M.ReadInt((struct_ptr + 0x28).ToString("X"));
 
             int output_size = 0;
-            for (int i = 0; i < children_count; i++)
+            for (int i = 0; ; i++)
             {
-                output_size += test_struct_param_size(struct_params_address + (i * 0x18));
+                long current_param_address = struct_params_address + (i * 32);
+                int param_group = M.ReadInt((current_param_address).ToString("X"));
+                if (param_group == 0x3B) break;
+
+                output_size += test_struct_param_size(current_param_address);
             }
-            return output_size;
+            if (reported_total_size != output_size)
+            {
+                Console.WriteLine("struct size mismatch in pre-calc offset... Struct size for " + M.ReadString(M.ReadLong(struct_ptr.ToString("X")).ToString("X"), "", 300) + " is " + output_size.ToString("X") + ", reported: " + reported_total_size.ToString("X"));
+            }
+            return reported_total_size;
         }
         public int test_struct_param_size(long current_param_address)
         {
             int output_size = 0;
-            int param_group = M.ReadInt((current_param_address + 0x08).ToString("X"));
+            int param_group = M.ReadInt((current_param_address).ToString("X"));
             // NOTE: this will be read as a regular long for the padding blocks
             long param_data_address = M.ReadLong((current_param_address + 0x10).ToString("X"));
 
@@ -646,13 +685,9 @@ namespace TagStructDumper{
                 // may or may not be inlined
                 case 0x39:
                     long array_struct_address = M.ReadLong((param_data_address + 0x18).ToString("X"));
-                    // poor man's for loop
+                    // rich mans flat code
                     long array_length = M.ReadLong((param_data_address + 0x08).ToString("X"));
-                    while (array_length > 0)
-                    {
-                        array_length--;
-                        output_size += test_struct_size(array_struct_address);
-                    }
+                    output_size += (int)array_length * test_struct_size(array_struct_address);
                     break;
             }
             return output_size;
@@ -678,7 +713,7 @@ namespace TagStructDumper{
             2,   //  _E // _field_word_flags
             1,   //  _F // _field_byte_flags
             4,   // _10 // _field_point_2d
-            4,   // _11 // _field_rectangle_2d
+            8,   // _11 // _field_rectangle_2d // NOTE: 4 in halo infinite, possibily 8 in halo 5
             4,   // _12 // _field_rgb_color
             4,   // _13 // _field_argb_color 
             4,   // _14 // _field_real
@@ -694,8 +729,8 @@ namespace TagStructDumper{
             16,  // _1E // _field_real_plane_3d
             12,  // _1F // _field_real_rgb_color
             16,  // _20 // _field_real_argb_color
-            4,   // _21 // _field_real_hsv_colo
-            4,   // _22 // _field_real_ahsv_color
+            12,  // _21 // _field_real_hsv_colo
+            16,  // _22 // _field_real_ahsv_color
             4,   // _23 // _field_short_bounds
             8,   // _24 // _field_angle_bounds
             8,   // _25 // _field_real_bounds
@@ -703,8 +738,8 @@ namespace TagStructDumper{
             4,   // _27 // 
             4,   // _28 //
             4,   // _29 // _field_long_block_flags
-            4,   // _2A // _field_word_block_flags
-            4,   // _2B // _field_byte_block_flags
+            2,   // _2A // _field_word_block_flags // NOTE: updated to 2 bytes
+            1,   // _2B // _field_byte_block_flags // NOTE: updated to 1 byte
             1,   // _2C // _field_char_block_index
             1,   // _2D // _field_custom_char_block_index
             2,   // _2E // _field_short_block_index
@@ -725,9 +760,9 @@ namespace TagStructDumper{
             2,   // _3D // _field_word_integer
             4,   // _3E // _field_dword_integer
             8,   // _3F // _field_qword_integer
-            20,  // _40 // _field_block_v2
-            28,  // _41 // _field_reference_v2
-            24,  // _42 // _field_data_v2
+            28,  // _40 // _field_block_v2 // NOTE: 20 in halo infinite, possibly 28 in halo 5
+            32,  // _41 // _field_reference_v2 // NOTE: 28 in halo infinite, possibly 32 in halo 5
+            28,  // _42 // _field_data_v2 // NOTE: 24 in halo infinite, possibly 28 in halo 5 
             16,  // _43 // tag_resource
             4,   // _44 // UNKNOWN
             4    // _45 // UNKNOWN
